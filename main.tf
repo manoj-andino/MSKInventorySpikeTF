@@ -1,9 +1,8 @@
 ########################################################################################################################
 # VPC and subnets 
 ########################################################################################################################
-
 resource "aws_vpc" "my_vpc" {
-  cidr_block = "10.0.0.0/16"
+  cidr_block = var.vpc_cidr_block
 
   tags = {
     Name = "${var.global_prefix} VPC"
@@ -49,29 +48,34 @@ resource "aws_route_table_association" "my_route_table_association" {
 }
 
 ########################################################################################################################
-# Security group
+# Kafka Security group
 ########################################################################################################################
 resource "aws_security_group" "kafka_sg" {
-  name   = "${var.global_prefix}_kafka_sg"
-  vpc_id = aws_vpc.my_vpc.id
-  ingress {
-    from_port   = 0
-    to_port     = 9092
-    protocol    = "TCP"
-    cidr_blocks = ["0.0.0.0/0"]
+  name        = "${var.global_prefix}_kafka_sg"
+  description = "Security group for MSK"
+  vpc_id      = aws_vpc.my_vpc.id
+  tags = {
+    Name = "${var.global_prefix}_kafka_sg"
   }
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "kafka_sg_ingress_rule" {
+  security_group_id = aws_security_group.kafka_sg.id
+
+  cidr_ipv4   = "0.0.0.0/0"
+  ip_protocol = "-1"
+}
+
+resource "aws_vpc_security_group_egress_rule" "kafka_sg_egress_rule" {
+  security_group_id = aws_security_group.kafka_sg.id
+
+  cidr_ipv4   = "0.0.0.0/0"
+  ip_protocol = "-1"
 }
 
 ########################################################################################################################
 # Kafka cluster
 ########################################################################################################################
-
 resource "aws_kms_key" "kafka_kms_key" {
   description = "Key for MSK"
 }
@@ -80,25 +84,25 @@ resource "aws_cloudwatch_log_group" "kafka_log_group" {
   name = "${var.global_prefix}_msk_logs"
 }
 
-resource "aws_msk_configuration" "kafka_cluster_custom_configuration" {
-  kafka_versions    = ["3.5.1"]
-  name              = "${var.global_prefix}_kafka_config"
-  server_properties = <<EOF
-    auto.create.topics.enable=false
-    default.replication.factor=3
-    min.insync.replicas=1
-    num.io.threads=8
-    num.network.threads=5
-    num.partitions=1
-    num.replica.fetchers=2
-    replica.lag.time.max.ms=30000
-    socket.receive.buffer.bytes=102400
-    socket.request.max.bytes=104857600
-    socket.send.buffer.bytes=102400
-    unclean.leader.election.enable=true
-    zookeeper.session.timeout.ms=18000
-  EOF
-}
+# resource "aws_msk_configuration" "kafka_cluster_custom_configuration" {
+#   kafka_versions    = ["3.5.1"]
+#   name              = "${var.global_prefix}_kafka_config"
+#   server_properties = <<PROPERTIES
+# auto.create.topics.enable=false
+# default.replication.factor=3
+# min.insync.replicas=2
+# num.io.threads=8
+# num.network.threads=5
+# num.partitions=1
+# num.replica.fetchers=2
+# replica.lag.time.max.ms=30000
+# socket.receive.buffer.bytes=102400
+# socket.request.max.bytes=104857600
+# socket.send.buffer.bytes=102400
+# unclean.leader.election.enable=true
+# zookeeper.session.timeout.ms=18000
+# PROPERTIES
+# }
 
 resource "aws_msk_cluster" "kafka_cluster" {
   cluster_name           = var.global_prefix
@@ -112,7 +116,159 @@ resource "aws_msk_cluster" "kafka_cluster" {
       aws_subnet.public_subnets[1].id,
       aws_subnet.public_subnets[2].id
     ]
+
+    connectivity_info {
+      public_access {
+        type = "DISABLED" //Update after creation
+      }
+    }
+
+    storage_info {
+      ebs_storage_info {
+        volume_size = 10
+      }
+    }
+
     security_groups = [aws_security_group.kafka_sg.id]
   }
 
+  # configuration_info {
+  #   arn      = aws_msk_configuration.kafka_cluster_custom_configuration.arn
+  #   revision = aws_msk_configuration.kafka_cluster_custom_configuration.latest_revision
+  # }
+
+  client_authentication {
+    sasl {
+      iam = true
+    }
+  }
+
+  encryption_info {
+    encryption_in_transit {
+      client_broker = "TLS"
+      in_cluster    = true
+    }
+    encryption_at_rest_kms_key_arn = aws_kms_key.kafka_kms_key.arn
+  }
+}
+
+########################################################################################################################
+# S3 Bucket
+########################################################################################################################
+resource "aws_s3_bucket" "my_s3_bucket" {
+  bucket        = "${var.global_prefix}-bucket"
+  force_destroy = true
+}
+
+resource "aws_s3_bucket_versioning" "my_s3_bucket_versioning" {
+  bucket = aws_s3_bucket.my_s3_bucket.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_notification" "s3_lambda_notification" {
+  bucket = aws_s3_bucket.my_s3_bucket.id
+
+  lambda_function {
+    lambda_function_arn = aws_lambda_function.my_lambda_function.arn
+    events = [
+      "s3:ObjectCreated:*"
+    ]
+  }
+
+  depends_on = [aws_lambda_permission.allow_s3_bucket]
+}
+########################################################################################################################
+# Lambda function
+########################################################################################################################
+resource "aws_iam_role" "lambda_iam_role" {
+  name = "${var.global_prefix}_lambda_iam_role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Sid    = ""
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_policy" "lambda_iam_policy" {
+  name        = "${var.global_prefix}_lambda_iam_policy"
+  description = "IAM policy for lambda"
+  path        = "/"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Effect   = "Allow"
+        Resource = "arn:aws:logs:*:*:*"
+      },
+      {
+        Action = [
+          "ec2:DescribeInstances",
+          "ec2:CreateNetworkInterface",
+          "ec2:AttachNetworkInterface",
+          "ec2:DescribeNetworkInterfaces",
+          "ec2:DeleteNetworkInterface"
+        ]
+        Effect   = "Allow"
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_iam_role_policy_attachment" {
+  role       = aws_iam_role.lambda_iam_role.name
+  policy_arn = aws_iam_policy.lambda_iam_policy.arn
+}
+
+resource "aws_lambda_function" "my_lambda_function" {
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_iam_role_policy_attachment,
+    aws_msk_cluster.kafka_cluster,
+    aws_subnet.public_subnets
+  ]
+  filename         = "${path.module}/lambda_code/${var.lambda_package_name}"
+  source_code_hash = filebase64sha256("${path.module}/lambda_code/${var.lambda_package_name}")
+  function_name    = "${var.global_prefix}_lambda_function"
+  role             = aws_iam_role.lambda_iam_role.arn
+
+  environment {
+    variables = {
+      MSK_BOOTSTRAP_SERVERS = aws_msk_cluster.kafka_cluster.bootstrap_brokers
+      TOPIC_NAME            = var.msk_topic_name
+      NUM_OF_PARTITIONS     = var.msk_topic_no_of_partitions
+      REPLICATION_FACTOR    = var.msk_topic_replication_factor
+    }
+  }
+
+  runtime      = var.lambda_runtime
+  handler      = var.lambda_handler_method
+  package_type = var.lambda_package_type
+  timeout      = 300
+  vpc_config {
+    security_group_ids = [aws_security_group.kafka_sg.id]
+    subnet_ids         = aws_subnet.public_subnets.*.id
+  }
+}
+
+resource "aws_lambda_permission" "allow_s3_bucket" {
+  statement_id  = "AllowExecutionFromS3Bucket"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.my_lambda_function.function_name
+  principal     = "s3.amazonaws.com"
+  source_arn    = aws_s3_bucket.my_s3_bucket.arn
 }
