@@ -258,7 +258,7 @@ resource "aws_lambda_function" "my_lambda_function" {
   runtime      = var.lambda_runtime
   handler      = var.lambda_handler_method
   package_type = var.lambda_package_type
-  timeout      = 300
+  timeout      = 60
   vpc_config {
     security_group_ids = [aws_security_group.kafka_sg.id]
     subnet_ids         = aws_subnet.public_subnets.*.id
