@@ -156,7 +156,7 @@ resource "aws_msk_cluster" "kafka_cluster" {
 # S3 Bucket
 ########################################################################################################################
 resource "aws_s3_bucket" "my_s3_bucket" {
-  bucket        = "${var.global_prefix}-bucket"
+  bucket        = var.bucket_name
   force_destroy = true
 }
 

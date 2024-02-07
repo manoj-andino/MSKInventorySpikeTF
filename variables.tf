@@ -7,7 +7,13 @@ variable "region" {
 variable "global_prefix" {
   description = "Prefix to use for AWS resources"
   type        = string
-  default     = "msk-inventory-spike"
+  default     = "msk_inventory_spike"
+}
+
+variable "bucket_name" {
+  description = "S3 bucket name (does not support underscore, used hyphen)"
+  type        = string
+  default     = "msk-inventory-spike-bucket"
 }
 
 variable "vpc_cidr_block" {
