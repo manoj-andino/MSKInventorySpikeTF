@@ -7,7 +7,7 @@ variable "region" {
 variable "global_prefix" {
   description = "Prefix to use for AWS resources"
   type        = string
-  default     = "msk_inventory_spike"
+  default     = "msk-inventory-spike"
 }
 
 variable "bucket_name" {

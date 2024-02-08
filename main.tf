@@ -221,7 +221,35 @@ resource "aws_iam_policy" "lambda_iam_policy" {
           "ec2:CreateNetworkInterface",
           "ec2:AttachNetworkInterface",
           "ec2:DescribeNetworkInterfaces",
-          "ec2:DeleteNetworkInterface"
+          "ec2:DeleteNetworkInterface",
+          "ec2:DescribeSubnets",
+          "ec2:AssignPrivateIpAddresses",
+          "ec2:UnassignPrivateIpAddresses"
+        ]
+        Effect   = "Allow"
+        Resource = "*"
+      },
+      {
+        Action = [
+          "kafka-cluster:Connect",
+          "kafka-cluster:AlterCluster",
+          "kafka-cluster:DescribeCluster",
+          "kafka-cluster:*Topic*",
+          "kafka-cluster:WriteData",
+          "kafka-cluster:ReadData",
+          "kafka-cluster:AlterGroup",
+          "kafka-cluster:DescribeGroup"
+        ]
+        Effect   = "Allow"
+        Resource = "*"
+      },
+      {
+        Action = [
+          "s3:Get*",
+          "s3:List*",
+          "s3:Describe*",
+          "s3-object-lambda:Get*",
+          "s3-object-lambda:List*"
         ]
         Effect   = "Allow"
         Resource = "*"
@@ -248,7 +276,7 @@ resource "aws_lambda_function" "my_lambda_function" {
 
   environment {
     variables = {
-      MSK_BOOTSTRAP_SERVERS = aws_msk_cluster.kafka_cluster.bootstrap_brokers
+      MSK_BOOTSTRAP_SERVERS = data.aws_msk_cluster.kafka_cluster_data.bootstrap_brokers
       TOPIC_NAME            = var.msk_topic_name
       NUM_OF_PARTITIONS     = var.msk_topic_no_of_partitions
       REPLICATION_FACTOR    = var.msk_topic_replication_factor
@@ -271,4 +299,14 @@ resource "aws_lambda_permission" "allow_s3_bucket" {
   function_name = aws_lambda_function.my_lambda_function.function_name
   principal     = "s3.amazonaws.com"
   source_arn    = aws_s3_bucket.my_s3_bucket.arn
+}
+
+resource "aws_vpc_endpoint" "my_s3_vpc_endpoint" {
+  vpc_id       = aws_vpc.my_vpc.id
+  service_name = "com.amazonaws.ap-south-1.s3"
+}
+
+resource "aws_vpc_endpoint_route_table_association" "my_vpce_route_table_association" {
+  route_table_id  = aws_route_table.my_route_table.id
+  vpc_endpoint_id = aws_vpc_endpoint.my_s3_vpc_endpoint.id
 }
