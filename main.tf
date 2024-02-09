@@ -119,7 +119,7 @@ resource "aws_msk_cluster" "kafka_cluster" {
 
     connectivity_info {
       public_access {
-        type = "DISABLED" //Update after creation
+        type = "DISABLED" //Update after creation DISABLED -> SERVICE_PROVIDED_EIPS
       }
     }
 
@@ -309,4 +309,21 @@ resource "aws_vpc_endpoint" "my_s3_vpc_endpoint" {
 resource "aws_vpc_endpoint_route_table_association" "my_vpce_route_table_association" {
   route_table_id  = aws_route_table.my_route_table.id
   vpc_endpoint_id = aws_vpc_endpoint.my_s3_vpc_endpoint.id
+}
+
+resource "aws_key_pair" "ec2_key" {
+  key_name   = var.ssh_key_name
+  public_key = var.ssh_public_key
+}
+
+resource "aws_instance" "msk_client_ec2" {
+  subnet_id                   = aws_subnet.public_subnets[0].id
+  ami                         = "ami-0449c34f967dbf18a"
+  instance_type               = "t2.micro"
+  key_name                    = aws_key_pair.ec2_key.key_name
+  associate_public_ip_address = true
+  vpc_security_group_ids      = [aws_security_group.kafka_sg.id]
+  tags = {
+    Name = "msk_client_ec2"
+  }
 }

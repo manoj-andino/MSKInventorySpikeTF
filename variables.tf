@@ -75,3 +75,15 @@ variable "lambda_package_name" {
   description = "Package name for lambda"
   default     = "InventoryS3FileUpdateLamda-1.0-SNAPSHOT.zip"
 }
+
+variable "ssh_key_name" {
+  type        = string
+  description = "Name for SSH public key for ec2 instance"
+  default     = "ec2_msk_client"
+}
+
+variable "ssh_public_key" {
+  type        = string
+  description = "SSH public key for ec2 instance"
+  default     = ""
+}
