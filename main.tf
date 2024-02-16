@@ -327,3 +327,16 @@ resource "aws_instance" "msk_client_ec2" {
     Name = "msk_client_ec2"
   }
 }
+########################################################################################################################
+# Dynamo DB
+########################################################################################################################
+resource "aws_dynamodb_table" "my_inventory_table_dynamodb" {
+  hash_key     = "product_id"
+  name         = "inventory"
+  billing_mode = "PAY_PER_REQUEST"
+
+  attribute {
+    name = "product_id"
+    type = "S"
+  }
+}
